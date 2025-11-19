@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>London Pub Finder</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+     crossorigin=""/>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+        
+        /* Floating Control Panel */
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        button {
+            background-color: #d32f2f; /* Pub Red */
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        button:hover { background-color: #b71c1c; }
+        button:disabled { background-color: #ccc; cursor: wait; }
+
+        #status {
+            font-size: 14px;
+            color: #333;
+            font-weight: 500;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        /* Custom Popup Styling */
+        .leaflet-popup-content-wrapper { border-radius: 12px; }
+        .leaflet-popup-content b { font-size: 16px; display: block; margin-bottom: 4px; color: #d32f2f; }
+        .leaflet-popup-content p { margin: 4px 0; font-size: 13px; color: #555; }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <span id="status">Ready to search</span>
+        <button onclick="findPubs()">🍺 Find Pubs Here</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+     crossorigin=""></script>
+
+    <script>
+        // 1. Initialize Map (Centered on Central London)
+        const map = L.map('map').setView([51.5074, -0.1278], 15);
+
+        // 2. Add OpenStreetMap Tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Store markers to manage them
+        let markers = L.layerGroup().addTo(map);
+
+        // 3. Function to Find Pubs using Overpass API
+        async function findPubs() {
+            const btn = document.querySelector('button');
+            const status = document.getElementById('status');
+            
+            // UI Feedback
+            btn.disabled = true;
+            status.textContent = "Scanning...";
+            
+            // Get current map boundaries
+            const bounds = map.getBounds();
+            const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+
+            // Overpass QL Query: Search for nodes/ways with amenity=pub in current view
+            const query = `
+                [out:json][timeout:25];
+                (
+                  node["amenity"="pub"](${bbox});
+                  way["amenity"="pub"](${bbox});
+                  relation["amenity"="pub"](${bbox});
+                );
+                out center;
+            `;
+
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                // Clear old markers to avoid duplicates if re-searching same area
+                markers.clearLayers();
+
+                if (data.elements.length === 0) {
+                    status.textContent = "No pubs found here.";
+                } else {
+                    status.textContent = `Found ${data.elements.length} pubs!`;
+                    
+                    data.elements.forEach(element => {
+                        let lat = element.lat;
+                        let lon = element.lon;
+
+                        // If it's a 'way' (building), use its center coordinates
+                        if (element.type === 'way' || element.type === 'relation') {
+                            lat = element.center.lat;
+                            lon = element.center.lon;
+                        }
+
+                        if (lat && lon) {
+                            const name = element.tags.name || "Unknown Pub";
+                            const website = element.tags.website;
+                            const hours = element.tags.opening_hours;
+
+                            // Create Popup Content
+                            let content = `<b>${name}</b>`;
+                            if (hours) content += `<p>🕒 ${hours}</p>`;
+                            if (website) content += `<p><a href="${website}" target="_blank">Visit Website</a></p>`;
+
+                            // Add Marker
+                            L.marker([lat, lon])
+                                .bindPopup(content)
+                                .addTo(markers);
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error(error);
+                status.textContent = "Error fetching data.";
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Optional: Auto-search on load
+        // findPubs(); 
+    </script>
+</body>
+</html>
